@@ -37,18 +37,18 @@ func TestPayloadMongoDB_Add(t *testing.T) {
 
 	db.Init()
 	if db.Count() != 0 {
-		t.Error("Database not properly initialized, payload count should be 0")
+		t.Error("Database not properly initialized, Subsrcribe count should be 0")
 	}
-	payload := Payload{
+	subs := Subscriber{
 		WebhookURL:      "http://remoteUrl:8080/randomWebhookPath",
 		BaseCurrency:    "EUR",
 		TargetCurrency:  "NOK",
 		MinTriggerValue: 1.50,
 		MaxTriggerValue: 2.55,
 	}
-	db.Add(payload)
+	db.Add(subs)
 	if db.Count() != 1 {
-		t.Error("Adding new payload failed.")
+		t.Error("Adding new Subscriber failed.")
 	}
 }
 
@@ -58,31 +58,31 @@ func TestPayloadMongoDB_Get(t *testing.T) {
 
 	db.Init()
 	if db.Count() != 0 {
-		t.Error("Database not properly initialized, payload count should be 0")
+		t.Error("Database not properly initialized, Subscriber count should be 0")
 	}
-	payload := Payload{
+	subs := Subscriber{
 		WebhookURL:      "http://remoteUrl:8080/randomWebhookPath",
 		BaseCurrency:    "EUR",
 		TargetCurrency:  "NOK",
 		MinTriggerValue: 1.50,
 		MaxTriggerValue: 2.55,
 	}
-	db.Add(payload)
+	db.Add(subs)
 	if db.Count() != 1 {
-		t.Error("Adding new payload failed.")
+		t.Error("Adding new Subscriber failed.")
 	}
 
-	newPayload, ok := db.Get(payload.WebhookURL)
+	newPayload, ok := db.Get(subs.WebhookURL)
 	if !ok {
-		t.Error("couldn't find " + payload.WebhookURL)
+		t.Error("couldn't find " + subs.WebhookURL)
 	}
 
-	if newPayload.WebhookURL != payload.WebhookURL ||
-		newPayload.BaseCurrency != payload.BaseCurrency ||
-		newPayload.TargetCurrency != payload.TargetCurrency ||
-		newPayload.MaxTriggerValue != payload.MaxTriggerValue ||
-		newPayload.MinTriggerValue != payload.MinTriggerValue {
-		t.Error("payload do not match")
+	if newPayload.WebhookURL != subs.WebhookURL ||
+		newPayload.BaseCurrency != subs.BaseCurrency ||
+		newPayload.TargetCurrency != subs.TargetCurrency ||
+		newPayload.MaxTriggerValue != subs.MaxTriggerValue ||
+		newPayload.MinTriggerValue != subs.MinTriggerValue {
+		t.Error("Subscriber do not match")
 
 	}
 }
