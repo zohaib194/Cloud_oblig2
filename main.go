@@ -42,19 +42,14 @@ type Invoked struct {
 }
 
 type Fixer struct {
-	WebhookID bson.ObjectId      `json:"_id, omitempty" bson:"_id"`
-	Base      string             `json:"base"`
-	Date      string             `json:"date"`
-	Rates     map[string]float32 `json:"rates"`
+	Base  string             `json:"base"`
+	Date  string             `json:"date"`
+	Rates map[string]float32 `json:"rates"`
 }
 
 type Latest struct {
 	BaseCurrency   string `json:"basecurrency"`
 	TargetCurrency string `json:"targetcurrency"`
-}
-
-type Payload_Latest struct {
-	LatestRate float32
 }
 
 type SlackPayload struct {
@@ -202,37 +197,6 @@ func registeredWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func retrivingLatest(w http.ResponseWriter, r *http.Request) {
-	body, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-	defer r.Body.Close()
-	var l Latest
-
-	err = json.Unmarshal(body, &l)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-	}
-	fixerURL := "http://api.fixer.io/latest?base=" + l.BaseCurrency
-
-	f, ok := GetFixer(fixerURL)
-
-	if !ok {
-		http.Error(w, "", http.StatusInternalServerError)
-	}
-
-	var pl Payload_Latest
-
-	for key, value := range f.Rates {
-		if key == l.TargetCurrency {
-			pl.LatestRate = value
-		}
-	}
-
-	fmt.Fprint(w, pl.LatestRate)
-}
-
 /*
 This function runs once automatically every 24hours
 InvokeWebhook take out all the payloads from WebhookCollection,
@@ -248,7 +212,6 @@ func InvokeWebhook() {
 
 	var form Invoked
 	var results []Subscriber
-	var ids []Id
 
 	//Connection to the database
 	session, err := mgo.Dial(db.DatabaseURL)
@@ -269,23 +232,19 @@ func InvokeWebhook() {
 
 	//Update the payload with currect rate
 	for i := 0; i < count; i++ {
-		fixerURL := "http://api.fixer.io/latest?base=" + results[i].BaseCurrency
 
 		form.BaseCurrency = results[i].BaseCurrency
 		form.TargetCurrency = results[i].TargetCurrency
 		form.MinTriggerValue = results[i].MinTriggerValue
 		form.MaxTriggerValue = results[i].MaxTriggerValue
 
+		fixerURL := "http://api.fixer.io/latest?base=" + results[i].BaseCurrency
 		f, ok := GetFixer(fixerURL)
-		err = session.DB(db.DatabaseName).C(db.WebhookCollection).Find(bson.M{"webhookurl": results[i].WebhookURL}).All(&ids)
-		if err != nil {
-			panic(err)
-		}
-		SaveFixer(&f, ids[i].ID)
 
 		if !ok {
 			panic(err)
 		}
+
 		// Run through all the rates
 		for key, value := range f.Rates {
 			// Checks if key"currency" matches a target currency
@@ -298,8 +257,8 @@ func InvokeWebhook() {
 
 						var slack SlackPayload
 						cr := strconv.FormatFloat(float64(form.CurrentRate), 'f', 3, 32)
-						min := strconv.FormatFloat(float64(form.MinTriggerValue), 'f', 1, 32)
-						max := strconv.FormatFloat(float64(form.MaxTriggerValue), 'f', 1, 32)
+						min := strconv.FormatFloat(float64(form.MinTriggerValue), 'f', 3, 32)
+						max := strconv.FormatFloat(float64(form.MaxTriggerValue), 'f', 3, 32)
 
 						slack.Text = "\nbaseCurrency: " + form.BaseCurrency + ",\ntargetCurrency: " + form.TargetCurrency + ",\ncurrentRate: " + cr + ",\nminTriggerValue: " + min + ",\nmaxTriggerValue: " + max
 
@@ -339,9 +298,128 @@ func InvokeWebhook() {
 	}
 }
 
-func GetFixer(url string) (Fixer, bool) {
-	var f Fixer
-	/*	res, err := http.Get(url)
+func retrivingLatest(w http.ResponseWriter, r *http.Request) {
+	db := WebhookMongoDB{
+		DatabaseURL:       "mongodb://localhost",
+		DatabaseName:      "Webhook",
+		WebhookCollection: "FixerPayload",
+	}
+	var l Latest
+
+	//Connection to the database
+	session, err := mgo.Dial(db.DatabaseURL)
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	defer r.Body.Close()
+
+	err = json.Unmarshal(body, &l)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+
+	if l.BaseCurrency != "EUR" {
+		http.Error(w, "Base currency must be EUR", http.StatusBadRequest)
+	}
+
+	// TODO
+	var fixer Fixer
+	err = session.DB(db.DatabaseName).C(db.WebhookCollection).Find(bson.M{"date": time.Now().Format("2006-01-02")}).One(&fixer)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	fmt.Print(time.Now().Format("2006-01-02"))
+	for key, value := range fixer.Rates {
+		if key == l.TargetCurrency {
+			fmt.Fprint(w, value)
+		}
+	}
+}
+
+func AverageRate(w http.ResponseWriter, r *http.Request) {
+	db := WebhookMongoDB{
+		DatabaseURL:       "mongodb://localhost",
+		DatabaseName:      "Webhook",
+		WebhookCollection: "FixerPayload",
+	}
+
+	var fixer []Fixer
+	session, err := mgo.Dial(db.DatabaseURL)
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	//startDate := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+	//endDate := time.Now().Format("2006-01-02")
+
+	//GetFixerSevenDays(time.Now().AddDate(0, 0, -7), time.Now())
+	// Remove all fixer payloads from the database
+	err = session.DB(db.DatabaseName).C(db.WebhookCollection).Find(nil).All(&fixer)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
+	// Read request body
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	defer r.Body.Close()
+	var l Latest
+
+	err = json.Unmarshal(body, &l)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+	var count []float32
+	var averageValue float32
+
+	for _, value := range fixer {
+		//fmt.Print(value)
+		if l.BaseCurrency == value.Base {
+			//fmt.Print(value)
+			temp := value
+			for k, v := range temp.Rates {
+				if l.TargetCurrency == k {
+					count = append(count, v)
+					fmt.Println(count)
+				}
+			}
+		}
+	}
+
+	for _, value := range count {
+		averageValue = averageValue + value
+	}
+	averageValue = averageValue / 7
+	fmt.Fprint(w, averageValue)
+
+}
+
+func LatestFixer() {
+	//Send request to Fixer.io
+	fixerURL := "http://api.fixer.io/latest?base=EUR"
+	f, ok := GetFixer(fixerURL)
+	if !ok {
+		fmt.Print("latestFixer()")
+	}
+	SaveFixer(f)
+}
+
+/*
+	Get the json from Fixer.io
+*/
+func GetFixer(url string) (*Fixer, bool) {
+	var f *Fixer
+	/*
+		res, err := http.Get(url)
 		if err != nil {
 			fmt.Printf(err.Error(), http.StatusBadRequest)
 			return f, false
@@ -363,7 +441,10 @@ func GetFixer(url string) (Fixer, bool) {
 	return f, true
 }
 
-func SaveFixer(f *Fixer, webhookID bson.ObjectId) {
+/*
+	Save Fixer payload in the collection
+*/
+func SaveFixer(f *Fixer) {
 	db := WebhookMongoDB{
 		DatabaseURL:       "mongodb://localhost",
 		DatabaseName:      "Webhook",
@@ -375,74 +456,89 @@ func SaveFixer(f *Fixer, webhookID bson.ObjectId) {
 		panic(err)
 	}
 	defer session.Close()
-	err = session.DB(db.DatabaseName).C(db.WebhookCollection).Insert(f)
+	err = session.DB(db.DatabaseName).C(db.WebhookCollection).Insert(&f)
 	if err != nil {
 		fmt.Printf("error in SaveFixer(), %v", err.Error())
+	}
+}
+
+/*
+	Take the first Fixer payload from the collections
+*/
+func GetFixerSevenDays(sd time.Time, ed time.Time) {
+	db := WebhookMongoDB{
+		DatabaseURL:       "mongodb://localhost",
+		DatabaseName:      "Webhook",
+		WebhookCollection: "FixerPayload",
+	}
+
+	//Connection to the database
+	session, err := mgo.Dial(db.DatabaseURL)
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+	var fixer *Fixer
+	for ; sd.Unix() <= ed.Unix(); sd = sd.AddDate(0, 0, +1) {
+
+		URL := "http://api.fixer.io/" + sd.Format("2006-01-02")
+		//fmt.Print(URL + "\n")
+		res, err := http.Get(URL)
+		if err != nil {
+			panic(err) //TODO
+		}
+
+		body, err := ioutil.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			panic(err)
+		}
+
+		err = json.Unmarshal(body, &fixer)
+		if err != nil {
+			panic(err)
+		}
+		//fmt.Print(fixer)
+		fixer.Date = sd.Format("2006-01-02")
+		SaveFixer(fixer)
+	}
+}
+
+func DropFixerCollection() {
+	db := WebhookMongoDB{
+		DatabaseURL:       "mongodb://localhost",
+		DatabaseName:      "Webhook",
+		WebhookCollection: "FixerPayload",
+	}
+
+	//Connection to the database
+	session, err := mgo.Dial(db.DatabaseURL)
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+	err = session.DB(db.DatabaseName).C(db.WebhookCollection).DropCollection()
+	if err != nil {
+		panic(err)
 	}
 }
 
 func main() {
 	os.Chdir("/home/zohaib/Desktop/Go/projects/cloud_oblig2")
 
-	ticker := time.NewTicker(time.Second * 10)
+	ticker := time.NewTicker(time.Second * 120)
 	go func() {
 		for t := range ticker.C {
 			//call functions
-			fmt.Print(t)
+			fmt.Printf("\n", t)
 			InvokeWebhook()
+			//GetFixerSevenDays(time.Now().AddDate(0, 0, -7), time.Now())
 		}
 	}()
 	http.HandleFunc("/root", postReqHandler)
 	http.HandleFunc("/root/", registeredWebhook)
 	http.HandleFunc("/root/latest", retrivingLatest)
+	http.HandleFunc("/root/average", AverageRate)
 	http.ListenAndServe(":8080", nil)
 	ticker.Stop()
 }
-
-//invoking part
-/*
-//Get the webhookUrl
-		url := id[2] + "//" + id[3] + "/" + id[4] + "/" + id[5] + "/" + id[6] + "/" + id[7]
-		var form Invoked
-		fmt.Print(url + "\n")
-		//Check if it exist in db
-
-		temp, ok := db.Get(url)
-
-		if !ok {
-			http.Error(w, "Not found in database", http.StatusInternalServerError)
-		}
-
-		//Update the Subscriber with currect rate
-
-		fixerUrl := "http://api.fixer.io/latest?base=" + temp.BaseCurrency
-
-		form.BaseCurrency = temp.BaseCurrency
-		form.TargetCurrency = temp.TargetCurrency
-		form.MinTriggerValue = temp.MinTriggerValue
-		form.MaxTriggerValue = temp.MaxTriggerValue
-		f, ok := GetFixer(fixerUrl)
-
-		if !ok {
-			http.Error(w, "Not found in database", http.StatusInternalServerError)
-		}
-
-		for key, value := range f.Rates {
-			if key == form.TargetCurrency {
-				form.CurrentRate = value
-			}
-		}
-
-		//Send notification to the webhookurl
-		postJSON, _ := json.Marshal(form)
-		postContent := bytes.NewBuffer(postJSON)
-		fmt.Println(postContent)
-		res, err := http.Post(temp.WebhookURL, "application/x-www-form-urlencoded", postContent)
-
-		if err != nil {
-			http.Error(w, "Post request body is not correctly formed", http.StatusBadRequest)
-		}
-		//if recieved the 200 or 204 status code
-		fmt.Printf("status: %s", res.Status)
-
-*/
