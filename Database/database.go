@@ -1,4 +1,4 @@
-package main
+package database
 
 import (
 	"fmt"
@@ -6,6 +6,11 @@ import (
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 )
+
+// Id (used temporary various places in the code to store _id of a certain webhook payload)
+type Id struct {
+	ID bson.ObjectId `bson:"_id"`
+}
 
 // Webhook mongodb stores the details of the DB connection.
 type WebhookMongoDB struct {

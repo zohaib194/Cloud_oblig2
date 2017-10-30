@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	database "github.com/cloud_oblig2/Database"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 )
@@ -22,11 +23,6 @@ type Subscriber struct {
 	TargetCurrency  string  `json:"targetcurrency" bson:"targetcurrency"`
 	MinTriggerValue float32 `json:"mintriggervalue" bson:"mintriggervalue"`
 	MaxTriggerValue float32 `json:"maxtriggervalue" bson:"maxtriggervalue"`
-}
-
-// Id (used temporary various places in the code to store _id of a certain webhook payload)
-type Id struct {
-	ID bson.ObjectId `bson:"_id"`
 }
 
 // Invoked (used to send the payload to a webhook when min or max values are triggered)
@@ -73,7 +69,7 @@ func validateCurrency(c string) bool {
 }
 
 func postReqHandler(w http.ResponseWriter, r *http.Request) {
-	db := WebhookMongoDB{
+	db := database.WebhookMongoDB{
 		DatabaseURL:  "mongodb://localhost",
 		DatabaseName: "Webhook",
 		Collection:   "WebhookPayload",
